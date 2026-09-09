@@ -2,20 +2,23 @@ package handler
 
 import (
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"encoding/json"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	"github.com/labstack/echo/v4"
-	"github.com/xesina/golang-echo-realworld-example-app/article"
-	"github.com/xesina/golang-echo-realworld-example-app/db"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
-	"github.com/xesina/golang-echo-realworld-example-app/router"
-	"github.com/xesina/golang-echo-realworld-example-app/store"
-	"github.com/xesina/golang-echo-realworld-example-app/user"
+	"github.com/stretchr/testify/assert"
+	"github.com/xesina/golang-gin-realworld-example-app/article"
+	"github.com/xesina/golang-gin-realworld-example-app/db"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/router"
+	"github.com/xesina/golang-gin-realworld-example-app/store"
+	"github.com/xesina/golang-gin-realworld-example-app/user"
 )
 
 var (
@@ -23,10 +26,11 @@ var (
 	us user.Store
 	as article.Store
 	h  *Handler
-	e  *echo.Echo
+	e  *gin.Engine
 )
 
 func TestMain(m *testing.M) {
+	gin.SetMode(gin.TestMode)
 	setup()
 	code := m.Run()
 	tearDown()
@@ -35,6 +39,27 @@ func TestMain(m *testing.M) {
 
 func authHeader(token string) string {
 	return "Token " + token
+}
+
+// newContext builds a gin context bound to req/rec, standing in for echo's
+// e.NewContext together with SetParamNames/SetParamValues. Route parameters
+// are passed as alternating key/value arguments.
+func newContext(rec *httptest.ResponseRecorder, req *http.Request, params ...string) *gin.Context {
+	c := gin.CreateTestContextOnly(rec, e)
+	c.Request = req
+	for i := 0; i+1 < len(params); i += 2 {
+		c.Params = append(c.Params, gin.Param{Key: params[i], Value: params[i+1]})
+	}
+	return c
+}
+
+// runWithJWT stands in for echo's middleware(handler)(c) composition: the
+// middleware runs first, and the handler runs only if it did not abort.
+func runWithJWT(c *gin.Context, mw gin.HandlerFunc, h gin.HandlerFunc) {
+	mw(c)
+	if !c.IsAborted() {
+		h(c)
+	}
 }
 
 func setup() {
@@ -134,4 +159,50 @@ func loadFixtures() error {
 	as.AddFavorite(&a2, 1)
 
 	return nil
+}
+
+// Every test in this package rebuilds the fixtures and then asserts against
+// them, so a fixture that silently fails to load turns into a confusing
+// failure somewhere else. This asserts the seeded state directly.
+func TestFixturesLoaded(t *testing.T) {
+	tearDown()
+	setup()
+
+	u1, err := us.GetByUsername("user1")
+	assert.NoError(t, err)
+	assert.NotNil(t, u1)
+	assert.Equal(t, "user1@realworld.io", u1.Email)
+	assert.Equal(t, "user1 bio", *u1.Bio)
+
+	u2, err := us.GetByUsername("user2")
+	assert.NoError(t, err)
+	assert.NotNil(t, u2)
+
+	following, err := us.IsFollower(u2.ID, u1.ID)
+	assert.NoError(t, err)
+	assert.True(t, following, "user1 must follow user2")
+
+	notFollowing, err := us.IsFollower(u1.ID, u2.ID)
+	assert.NoError(t, err)
+	assert.False(t, notFollowing, "the follow must not be mutual")
+
+	a1, err := as.GetBySlug("article1-slug")
+	assert.NoError(t, err)
+	assert.NotNil(t, a1)
+	assert.Equal(t, u1.ID, a1.AuthorID)
+	assert.Len(t, a1.Tags, 2)
+
+	a2, err := as.GetBySlug("article2-slug")
+	assert.NoError(t, err)
+	assert.NotNil(t, a2)
+	assert.Equal(t, u2.ID, a2.AuthorID)
+	assert.Len(t, a2.Favorites, 1, "article2 is favorited by user1")
+
+	comments, err := as.GetCommentsBySlug("article1-slug")
+	assert.NoError(t, err)
+	assert.Len(t, comments, 1)
+
+	tags, err := as.ListTags()
+	assert.NoError(t, err)
+	assert.Len(t, tags, 2)
 }

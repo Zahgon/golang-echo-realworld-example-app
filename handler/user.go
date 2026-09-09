@@ -3,9 +3,9 @@ package handler
 import (
 	"net/http"
 
-	"github.com/labstack/echo/v4"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
-	"github.com/xesina/golang-echo-realworld-example-app/utils"
+	"github.com/gin-gonic/gin"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/utils"
 )
 
 // SignUp godoc
@@ -21,16 +21,19 @@ import (
 // @Failure 404 {object} utils.Error
 // @Failure 500 {object} utils.Error
 // @Router /users [post]
-func (h *Handler) SignUp(c echo.Context) error {
+func (h *Handler) SignUp(c *gin.Context) {
 	var u model.User
 	req := &userRegisterRequest{}
 	if err := req.bind(c, &u); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 	if err := h.userStore.Create(&u); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
-	return c.JSON(http.StatusCreated, newUserResponse(&u))
+	utils.JSON(c, http.StatusCreated, newUserResponse(&u))
+	return
 }
 
 // Login godoc
@@ -48,22 +51,27 @@ func (h *Handler) SignUp(c echo.Context) error {
 // @Failure 404 {object} utils.Error
 // @Failure 500 {object} utils.Error
 // @Router /users/login [post]
-func (h *Handler) Login(c echo.Context) error {
+func (h *Handler) Login(c *gin.Context) {
 	req := &userLoginRequest{}
 	if err := req.bind(c); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 	u, err := h.userStore.GetByEmail(req.User.Email)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusForbidden, utils.AccessForbidden())
+		utils.JSON(c, http.StatusForbidden, utils.AccessForbidden())
+		return
 	}
 	if !u.CheckPassword(req.User.Password) {
-		return c.JSON(http.StatusForbidden, utils.AccessForbidden())
+		utils.JSON(c, http.StatusForbidden, utils.AccessForbidden())
+		return
 	}
-	return c.JSON(http.StatusOK, newUserResponse(u))
+	utils.JSON(c, http.StatusOK, newUserResponse(u))
+	return
 }
 
 // CurrentUser godoc
@@ -81,15 +89,18 @@ func (h *Handler) Login(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /user [get]
-func (h *Handler) CurrentUser(c echo.Context) error {
+func (h *Handler) CurrentUser(c *gin.Context) {
 	u, err := h.userStore.GetByID(userIDFromToken(c))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
-	return c.JSON(http.StatusOK, newUserResponse(u))
+	utils.JSON(c, http.StatusOK, newUserResponse(u))
+	return
 }
 
 // UpdateUser godoc
@@ -108,23 +119,28 @@ func (h *Handler) CurrentUser(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /user [put]
-func (h *Handler) UpdateUser(c echo.Context) error {
+func (h *Handler) UpdateUser(c *gin.Context) {
 	u, err := h.userStore.GetByID(userIDFromToken(c))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 	req := newUserUpdateRequest()
 	req.populate(u)
 	if err := req.bind(c, u); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 	if err := h.userStore.Update(u); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
-	return c.JSON(http.StatusOK, newUserResponse(u))
+	utils.JSON(c, http.StatusOK, newUserResponse(u))
+	return
 }
 
 // GetProfile godoc
@@ -143,16 +159,19 @@ func (h *Handler) UpdateUser(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /profiles/{username} [get]
-func (h *Handler) GetProfile(c echo.Context) error {
+func (h *Handler) GetProfile(c *gin.Context) {
 	username := c.Param("username")
 	u, err := h.userStore.GetByUsername(username)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
-	return c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	return
 }
 
 // Follow godoc
@@ -171,20 +190,24 @@ func (h *Handler) GetProfile(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /profiles/{username}/follow [post]
-func (h *Handler) Follow(c echo.Context) error {
+func (h *Handler) Follow(c *gin.Context) {
 	followerID := userIDFromToken(c)
 	username := c.Param("username")
 	u, err := h.userStore.GetByUsername(username)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 	if err := h.userStore.AddFollower(u, followerID); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
-	return c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	return
 }
 
 // Unfollow godoc
@@ -203,24 +226,32 @@ func (h *Handler) Follow(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /profiles/{username}/follow [delete]
-func (h *Handler) Unfollow(c echo.Context) error {
+func (h *Handler) Unfollow(c *gin.Context) {
 	followerID := userIDFromToken(c)
 	username := c.Param("username")
 	u, err := h.userStore.GetByUsername(username)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 	if u == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 	if err := h.userStore.RemoveFollower(u, followerID); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
-	return c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+	return
 }
 
-func userIDFromToken(c echo.Context) uint {
-	id, ok := c.Get("user").(uint)
+func userIDFromToken(c *gin.Context) uint {
+	v, ok := c.Get("user")
+	if !ok {
+		return 0
+	}
+	id, ok := v.(uint)
 	if !ok {
 		return 0
 	}

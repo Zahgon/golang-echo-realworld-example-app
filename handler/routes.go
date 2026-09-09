@@ -1,12 +1,14 @@
 package handler
 
 import (
-	"github.com/labstack/echo/v4"
-	"github.com/xesina/golang-echo-realworld-example-app/router/middleware"
-	"github.com/xesina/golang-echo-realworld-example-app/utils"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/xesina/golang-gin-realworld-example-app/router/middleware"
+	"github.com/xesina/golang-gin-realworld-example-app/utils"
 )
 
-func (h *Handler) Register(v1 *echo.Group) {
+func (h *Handler) Register(v1 *gin.RouterGroup) {
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
 	guestUsers := v1.Group("/users")
 	guestUsers.POST("", h.SignUp)
@@ -16,15 +18,24 @@ func (h *Handler) Register(v1 *echo.Group) {
 	user.GET("", h.CurrentUser)
 	user.PUT("", h.UpdateUser)
 
-	profiles := v1.Group("/profiles", jwtMiddleware)
+	// reading a profile is optional-auth per the RealWorld spec; following and
+	// unfollowing still require a token.
+	profiles := v1.Group("/profiles", middleware.JWTWithConfig(
+		middleware.JWTConfig{
+			Skipper: func(c *gin.Context) bool {
+				return c.Request.Method == http.MethodGet
+			},
+			SigningKey: utils.JWTSecret,
+		},
+	))
 	profiles.GET("/:username", h.GetProfile)
 	profiles.POST("/:username/follow", h.Follow)
 	profiles.DELETE("/:username/follow", h.Unfollow)
 
 	articles := v1.Group("/articles", middleware.JWTWithConfig(
 		middleware.JWTConfig{
-			Skipper: func(c echo.Context) bool {
-				if c.Request().Method == "GET" && c.Path() != "/api/articles/feed" {
+			Skipper: func(c *gin.Context) bool {
+				if c.Request.Method == http.MethodGet && c.FullPath() != "/api/articles/feed" {
 					return true
 				}
 				return false

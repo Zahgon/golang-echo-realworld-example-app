@@ -7,22 +7,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
-	"github.com/xesina/golang-echo-realworld-example-app/router"
-	"github.com/xesina/golang-echo-realworld-example-app/router/middleware"
-	"github.com/xesina/golang-echo-realworld-example-app/utils"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/router/middleware"
+	"github.com/xesina/golang-gin-realworld-example-app/utils"
 )
 
 func TestListArticlesCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
-	e := router.New()
-	req := httptest.NewRequest(echo.GET, "/api/articles", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req := httptest.NewRequest(http.MethodGet, "/api/articles", nil)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	assert.NoError(t, h.Articles(c))
+	c := newContext(rec, req)
+	h.Articles(c)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var aa articleListResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &aa)
@@ -34,14 +32,11 @@ func TestListArticlesCaseSuccess(t *testing.T) {
 func TestGetArticlesCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
-	req := httptest.NewRequest(echo.GET, "/api/articles/:slug", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req := httptest.NewRequest(http.MethodGet, "/api/articles/:slug", nil)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	assert.NoError(t, h.GetArticle(c))
+	c := newContext(rec, req, "slug", "article1-slug")
+	h.GetArticle(c)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var a singleArticleResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -58,15 +53,12 @@ func TestCreateArticlesCaseSuccess(t *testing.T) {
 		reqJSON = `{"article":{"title":"article2", "description":"article2", "body":"article2", "tagList":["tag1","tag2"]}}`
 	)
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.POST, "/api/articles", strings.NewReader(reqJSON))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodPost, "/api/articles", strings.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.CreateArticle(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req)
+	runWithJWT(c, jwtMiddleware, h.CreateArticle)
 	if assert.Equal(t, http.StatusCreated, rec.Code) {
 		var a singleArticleResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -86,18 +78,12 @@ func TestUpdateArticlesCaseSuccess(t *testing.T) {
 		reqJSON = `{"article":{"title":"article1 part 2", "tagList":["tag3"]}}`
 	)
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.PUT, "/api/articles/:slug", strings.NewReader(reqJSON))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodPut, "/api/articles/:slug", strings.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.UpdateArticle(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug")
+	runWithJWT(c, jwtMiddleware, h.UpdateArticle)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var a singleArticleResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -113,15 +99,12 @@ func TestFeedCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.GET, "/api/articles/feed", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodGet, "/api/articles/feed", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.Feed(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req)
+	runWithJWT(c, jwtMiddleware, h.Feed)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var a articleListResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -137,18 +120,12 @@ func TestDeleteArticleCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.DELETE, "/api/articles/:slug", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodDelete, "/api/articles/:slug", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.DeleteArticle(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug")
+	runWithJWT(c, jwtMiddleware, h.DeleteArticle)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -156,18 +133,12 @@ func TestGetCommentsCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.GET, "/api/articles/:slug/comments", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(2)))
+	req := httptest.NewRequest(http.MethodGet, "/api/articles/:slug/comments", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(2)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug/comments")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.GetComments(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug")
+	runWithJWT(c, jwtMiddleware, h.GetComments)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var cc commentListResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &cc)
@@ -183,18 +154,12 @@ func TestAddCommentCaseSuccess(t *testing.T) {
 		reqJSON = `{"comment":{"body":"article1 comment2 by user2"}}`
 	)
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.POST, "/api/articles/:slug/comments", strings.NewReader(reqJSON))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(2)))
+	req := httptest.NewRequest(http.MethodPost, "/api/articles/:slug/comments", strings.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(2)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug/comments")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.AddComment(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug")
+	runWithJWT(c, jwtMiddleware, h.AddComment)
 	if assert.Equal(t, http.StatusCreated, rec.Code) {
 		var c singleCommentResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &c)
@@ -208,20 +173,12 @@ func TestDeleteCommentCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.DELETE, "/api/articles/:slug/comments/:id", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodDelete, "/api/articles/:slug/comments/:id", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug/comments/:id")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	c.SetParamNames("id")
-	c.SetParamValues("1")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.DeleteComment(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug", "id", "1")
+	runWithJWT(c, jwtMiddleware, h.DeleteComment)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -229,18 +186,12 @@ func TestFavoriteCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.POST, "/api/articles/:slug/favorite", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(2)))
+	req := httptest.NewRequest(http.MethodPost, "/api/articles/:slug/favorite", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(2)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug/comments")
-	c.SetParamNames("slug")
-	c.SetParamValues("article1-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.Favorite(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article1-slug")
+	runWithJWT(c, jwtMiddleware, h.Favorite)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var a singleArticleResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -255,18 +206,12 @@ func TestUnfavoriteCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
 	jwtMiddleware := middleware.JWT(utils.JWTSecret)
-	req := httptest.NewRequest(echo.DELETE, "/api/articles/:slug/favorite", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAuthorization, authHeader(utils.GenerateJWT(1)))
+	req := httptest.NewRequest(http.MethodDelete, "/api/articles/:slug/favorite", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/api/articles/:slug/favorite")
-	c.SetParamNames("slug")
-	c.SetParamValues("article2-slug")
-	err := jwtMiddleware(func(context echo.Context) error {
-		return h.Unfavorite(c)
-	})(c)
-	assert.NoError(t, err)
+	c := newContext(rec, req, "slug", "article2-slug")
+	runWithJWT(c, jwtMiddleware, h.Unfavorite)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var a singleArticleResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &a)
@@ -280,11 +225,11 @@ func TestUnfavoriteCaseSuccess(t *testing.T) {
 func TestGetTagsCaseSuccess(t *testing.T) {
 	tearDown()
 	setup()
-	req := httptest.NewRequest(echo.GET, "/api/tags", nil)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req := httptest.NewRequest(http.MethodGet, "/api/tags", nil)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	assert.NoError(t, h.Tags(c))
+	c := newContext(rec, req)
+	h.Tags(c)
 	if assert.Equal(t, http.StatusOK, rec.Code) {
 		var tt tagListResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &tt)
@@ -292,5 +237,36 @@ func TestGetTagsCaseSuccess(t *testing.T) {
 		assert.Equal(t, 2, len(tt.Tags))
 		assert.Contains(t, tt.Tags, "tag1")
 		assert.Contains(t, tt.Tags, "tag2")
+	}
+}
+
+// The fixtures give user1 one article of their own and one article from the
+// user they follow, so the original feed count - which counted the caller's own
+// articles - was indistinguishable from the correct one. Adding a second
+// article by the caller separates them.
+func TestFeedCountCountsFollowedAuthorsNotCaller(t *testing.T) {
+	tearDown()
+	setup()
+	own := model.Article{
+		Slug:        "user1-second-slug",
+		Title:       "user1 second title",
+		Description: "d",
+		Body:        "b",
+		AuthorID:    1,
+	}
+	assert.NoError(t, as.CreateArticle(&own))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/articles/feed", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
+	rec := httptest.NewRecorder()
+	c := newContext(rec, req)
+	runWithJWT(c, middleware.JWT(utils.JWTSecret), h.Feed)
+
+	if assert.Equal(t, http.StatusOK, rec.Code) {
+		var a articleListResponse
+		assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &a))
+		assert.Equal(t, 1, len(a.Articles), "feed holds only the followed author's article")
+		assert.Equal(t, 1, a.ArticlesCount, "count must match the feed, not the caller's own article count")
 	}
 }

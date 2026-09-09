@@ -15,3 +15,11 @@ type Validator struct {
 func (v *Validator) Validate(i interface{}) error {
 	return v.validator.Struct(i)
 }
+
+// gin has no per-engine validator hook to hang this off, the way echo's
+// Echo.Validator did, so request binding calls Validate directly.
+var defaultValidator = NewValidator()
+
+func Validate(i interface{}) error {
+	return defaultValidator.Validate(i)
+}

@@ -2,7 +2,7 @@ package store
 
 import (
 	"github.com/jinzhu/gorm"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
 )
 
 type UserStore struct {

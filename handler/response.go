@@ -3,10 +3,10 @@ package handler
 import (
 	"time"
 
-	"github.com/xesina/golang-echo-realworld-example-app/model"
-	"github.com/xesina/golang-echo-realworld-example-app/user"
-	"github.com/xesina/golang-echo-realworld-example-app/utils"
-	"github.com/labstack/echo/v4"
+	"github.com/gin-gonic/gin"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/user"
+	"github.com/xesina/golang-gin-realworld-example-app/utils"
 )
 
 type userResponse struct {
@@ -74,7 +74,7 @@ type articleListResponse struct {
 	ArticlesCount int                `json:"articlesCount"`
 }
 
-func newArticleResponse(c echo.Context, a *model.Article) *singleArticleResponse {
+func newArticleResponse(c *gin.Context, a *model.Article) *singleArticleResponse {
 	ar := new(articleResponse)
 	ar.TagList = make([]string, 0)
 	ar.Slug = a.Slug
@@ -151,7 +151,7 @@ type commentListResponse struct {
 	Comments []commentResponse `json:"comments"`
 }
 
-func newCommentResponse(c echo.Context, cm *model.Comment) *singleCommentResponse {
+func newCommentResponse(c *gin.Context, cm *model.Comment) *singleCommentResponse {
 	comment := new(commentResponse)
 	comment.ID = cm.ID
 	comment.Body = cm.Body
@@ -164,7 +164,7 @@ func newCommentResponse(c echo.Context, cm *model.Comment) *singleCommentRespons
 	return &singleCommentResponse{comment}
 }
 
-func newCommentListResponse(c echo.Context, comments []model.Comment) *commentListResponse {
+func newCommentListResponse(c *gin.Context, comments []model.Comment) *commentListResponse {
 	r := new(commentListResponse)
 	cr := commentResponse{}
 	r.Comments = make([]commentResponse, 0)

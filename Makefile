@@ -1,7 +1,7 @@
 #@IgnoreInspection BashAddShebang
 export ROOT=$(realpath $(dir $(lastword $(MAKEFILE_LIST))))
 export DEBUG=true
-export APP=golang-echo-realworld-example-app
+export APP=golang-gin-realworld-example-app
 export LDFLAGS="-w -s"
 
 all: build test
@@ -23,9 +23,9 @@ test:
 	go test -v -race ./...
 
 container:
-	docker build -t echo-realworld .
+	docker build -t gin-realworld .
 
 run-container:
-	docker run --rm -it echo-realworld
+	docker run --rm -it gin-realworld
 
 .PHONY: build run build-static test container

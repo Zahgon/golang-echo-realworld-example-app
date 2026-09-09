@@ -1,10 +1,24 @@
 package handler
 
 import (
+	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/gosimple/slug"
-	"github.com/labstack/echo/v4"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/router"
 )
+
+// bindJSON decodes the JSON request body into obj. echo's binder left obj
+// untouched and reported no error when the body was empty, leaving the
+// validator to decide; gin's ShouldBindJSON reports EOF instead, so the empty
+// body is short-circuited here to keep the original behaviour.
+func bindJSON(c *gin.Context, obj interface{}) error {
+	req := c.Request
+	if req == nil || req.ContentLength == 0 {
+		return nil
+	}
+	return c.ShouldBindWith(obj, binding.JSON)
+}
 
 type userUpdateRequest struct {
 	User struct {
@@ -32,11 +46,11 @@ func (r *userUpdateRequest) populate(u *model.User) {
 	}
 }
 
-func (r *userUpdateRequest) bind(c echo.Context, u *model.User) error {
-	if err := c.Bind(r); err != nil {
+func (r *userUpdateRequest) bind(c *gin.Context, u *model.User) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	u.Username = r.User.Username
@@ -61,11 +75,11 @@ type userRegisterRequest struct {
 	} `json:"user"`
 }
 
-func (r *userRegisterRequest) bind(c echo.Context, u *model.User) error {
-	if err := c.Bind(r); err != nil {
+func (r *userRegisterRequest) bind(c *gin.Context, u *model.User) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	u.Username = r.User.Username
@@ -85,11 +99,11 @@ type userLoginRequest struct {
 	} `json:"user"`
 }
 
-func (r *userLoginRequest) bind(c echo.Context) error {
-	if err := c.Bind(r); err != nil {
+func (r *userLoginRequest) bind(c *gin.Context) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	return nil
@@ -100,15 +114,15 @@ type articleCreateRequest struct {
 		Title       string   `json:"title" validate:"required"`
 		Description string   `json:"description" validate:"required"`
 		Body        string   `json:"body" validate:"required"`
-		Tags        []string `json:"tagList, omitempty"`
+		Tags        []string `json:"tagList,omitempty"`
 	} `json:"article"`
 }
 
-func (r *articleCreateRequest) bind(c echo.Context, a *model.Article) error {
-	if err := c.Bind(r); err != nil {
+func (r *articleCreateRequest) bind(c *gin.Context, a *model.Article) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	a.Title = r.Article.Title
@@ -138,11 +152,11 @@ func (r *articleUpdateRequest) populate(a *model.Article) {
 	r.Article.Body = a.Body
 }
 
-func (r *articleUpdateRequest) bind(c echo.Context, a *model.Article) error {
-	if err := c.Bind(r); err != nil {
+func (r *articleUpdateRequest) bind(c *gin.Context, a *model.Article) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	a.Title = r.Article.Title
@@ -158,11 +172,11 @@ type createCommentRequest struct {
 	} `json:"comment"`
 }
 
-func (r *createCommentRequest) bind(c echo.Context, cm *model.Comment) error {
-	if err := c.Bind(r); err != nil {
+func (r *createCommentRequest) bind(c *gin.Context, cm *model.Comment) error {
+	if err := bindJSON(c, r); err != nil {
 		return err
 	}
-	if err := c.Validate(r); err != nil {
+	if err := router.Validate(r); err != nil {
 		return err
 	}
 	cm.Body = r.Comment.Body

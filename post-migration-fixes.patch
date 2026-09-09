@@ -1,0 +1,1427 @@
+diff --git a/Dockerfile b/Dockerfile
+index 25484fc..f7f9ca8 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -3,9 +3,14 @@
+ #
+ FROM golang:1.25 AS build
+ 
++# No GOOS/GOARCH here on purpose. In a docker build the build stage already
++# runs on the target platform, so pinning an architecture turns every build on
++# a different host into a cross compile - and go then disables cgo by default,
++# which silently swaps the sqlite3 driver for a stub that fails at runtime
++# rather than at build time. CGO_ENABLED is set explicitly so that degrading
++# can never happen quietly; use docker's --platform to choose an architecture.
+ ENV GO111MODULE=on \
+-    GOOS=linux \
+-    GOARCH=amd64
++    CGO_ENABLED=1
+ 
+ RUN mkdir -p /src
+ 
+@@ -21,9 +26,11 @@ COPY . /src
+ 
+ # Build components.
+ # Put built binaries and runtime resources in /app dir ready to be copied over or used.
+-RUN go install -installsuffix cgo -ldflags="-w -s" && \
+-    mkdir -p /app && \
+-    cp -r $GOPATH/bin/golang-echo-realworld-example-app /app/
++# go build -o writes exactly where it is told. go install placed the binary in
++# an architecture suffixed directory whenever the build cross compiled, which
++# broke the copy that followed on any host that was not linux/amd64.
++RUN mkdir -p /app && \
++    go build -installsuffix cgo -ldflags="-w -s" -o /app/golang-gin-realworld-example-app .
+ 
+ #
+ # 2. Runtime Container
+@@ -52,4 +59,4 @@ COPY --from=build /app /app/
+ 
+ EXPOSE 8585
+ 
+-CMD ["./golang-echo-realworld-example-app"]
++CMD ["./golang-gin-realworld-example-app"]
+diff --git a/Makefile b/Makefile
+index 10736a3..c6ecad2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ #@IgnoreInspection BashAddShebang
+ export ROOT=$(realpath $(dir $(lastword $(MAKEFILE_LIST))))
+ export DEBUG=true
+-export APP=golang-echo-realworld-example-app
++export APP=golang-gin-realworld-example-app
+ export LDFLAGS="-w -s"
+ 
+ all: build test
+@@ -23,9 +23,9 @@ test:
+ 	go test -v -race ./...
+ 
+ container:
+-	docker build -t echo-realworld .
++	docker build -t gin-realworld .
+ 
+ run-container:
+-	docker run --rm -it echo-realworld
++	docker run --rm -it gin-realworld
+ 
+ .PHONY: build run build-static test container
+diff --git a/article/article.go b/article/article.go
+index 62231bb..64c0073 100644
+--- a/article/article.go
++++ b/article/article.go
+@@ -1,7 +1,7 @@
+ package article
+ 
+ import (
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
+ )
+ 
+ type Store interface {
+diff --git a/db/db.go b/db/db.go
+index 1d26936..244e58e 100644
+--- a/db/db.go
++++ b/db/db.go
+@@ -7,7 +7,7 @@ import (
+ 
+ 	"github.com/jinzhu/gorm"
+ 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
+ )
+ 
+ func New() *gorm.DB {
+@@ -37,7 +37,7 @@ func DropTestDB() error {
+ 	return nil
+ }
+ 
+-//TODO: err check
++// TODO: err check
+ func AutoMigrate(db *gorm.DB) {
+ 	db.AutoMigrate(
+ 		&model.User{},
+diff --git a/go.mod b/go.mod
+index f1a2a20..01db2a0 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,4 +1,4 @@
+-module github.com/xesina/golang-echo-realworld-example-app
++module github.com/xesina/golang-gin-realworld-example-app
+ 
+ go 1.25.0
+ 
+diff --git a/handler/article.go b/handler/article.go
+index 3e3a8ab..6e6b205 100644
+--- a/handler/article.go
++++ b/handler/article.go
+@@ -6,8 +6,8 @@ import (
+ 	"strconv"
+ 
+ 	"github.com/gin-gonic/gin"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ // GetArticle godoc
+@@ -27,16 +27,16 @@ func (h *Handler) GetArticle(c *gin.Context) {
+ 	a, err := h.articleStore.GetBySlug(slug)
+ 
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleResponse(c, a))
++	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+ 	return
+ }
+ 
+@@ -78,30 +78,30 @@ func (h *Handler) Articles(c *gin.Context) {
+ 	if tag != "" {
+ 		articles, count, err = h.articleStore.ListByTag(tag, offset, limit)
+ 		if err != nil {
+-			c.JSON(http.StatusInternalServerError, nil)
++			utils.JSON(c, http.StatusInternalServerError, nil)
+ 			return
+ 		}
+ 	} else if author != "" {
+ 		articles, count, err = h.articleStore.ListByAuthor(author, offset, limit)
+ 		if err != nil {
+-			c.JSON(http.StatusInternalServerError, nil)
++			utils.JSON(c, http.StatusInternalServerError, nil)
+ 			return
+ 		}
+ 	} else if favoritedBy != "" {
+ 		articles, count, err = h.articleStore.ListByWhoFavorited(favoritedBy, offset, limit)
+ 		if err != nil {
+-			c.JSON(http.StatusInternalServerError, nil)
++			utils.JSON(c, http.StatusInternalServerError, nil)
+ 			return
+ 		}
+ 	} else {
+ 		articles, count, err = h.articleStore.List(offset, limit)
+ 		if err != nil {
+-			c.JSON(http.StatusInternalServerError, nil)
++			utils.JSON(c, http.StatusInternalServerError, nil)
+ 			return
+ 		}
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
++	utils.JSON(c, http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+ 	return
+ }
+ 
+@@ -137,11 +137,11 @@ func (h *Handler) Feed(c *gin.Context) {
+ 
+ 	articles, count, err = h.articleStore.ListFeed(userIDFromToken(c), offset, limit)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, nil)
++		utils.JSON(c, http.StatusInternalServerError, nil)
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
++	utils.JSON(c, http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+ 	return
+ }
+ 
+@@ -164,7 +164,7 @@ func (h *Handler) CreateArticle(c *gin.Context) {
+ 
+ 	req := &articleCreateRequest{}
+ 	if err := req.bind(c, &a); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+@@ -172,11 +172,11 @@ func (h *Handler) CreateArticle(c *gin.Context) {
+ 
+ 	err := h.articleStore.CreateArticle(&a)
+ 	if err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusCreated, newArticleResponse(c, &a))
++	utils.JSON(c, http.StatusCreated, newArticleResponse(c, &a))
+ 	return
+ }
+ 
+@@ -202,12 +202,12 @@ func (h *Handler) UpdateArticle(c *gin.Context) {
+ 
+ 	a, err := h.articleStore.GetUserArticleBySlug(userIDFromToken(c), slug)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+@@ -215,16 +215,16 @@ func (h *Handler) UpdateArticle(c *gin.Context) {
+ 	req.populate(a)
+ 
+ 	if err := req.bind(c, a); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if err = h.articleStore.UpdateArticle(a, req.Article.Tags); err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleResponse(c, a))
++	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+ 	return
+ }
+ 
+@@ -247,22 +247,22 @@ func (h *Handler) DeleteArticle(c *gin.Context) {
+ 
+ 	a, err := h.articleStore.GetUserArticleBySlug(userIDFromToken(c), slug)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+ 	err = h.articleStore.DeleteArticle(a)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, map[string]interface{}{"result": "ok"})
++	utils.JSON(c, http.StatusOK, map[string]interface{}{"result": "ok"})
+ 	return
+ }
+ 
+@@ -288,12 +288,12 @@ func (h *Handler) AddComment(c *gin.Context) {
+ 
+ 	a, err := h.articleStore.GetBySlug(slug)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+@@ -301,16 +301,16 @@ func (h *Handler) AddComment(c *gin.Context) {
+ 
+ 	req := &createCommentRequest{}
+ 	if err := req.bind(c, &cm); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if err = h.articleStore.AddComment(a, &cm); err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusCreated, newCommentResponse(c, &cm))
++	utils.JSON(c, http.StatusCreated, newCommentResponse(c, &cm))
+ 	return
+ }
+ 
+@@ -331,11 +331,11 @@ func (h *Handler) GetComments(c *gin.Context) {
+ 
+ 	cm, err := h.articleStore.GetCommentsBySlug(slug)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newCommentListResponse(c, cm))
++	utils.JSON(c, http.StatusOK, newCommentListResponse(c, cm))
+ 	return
+ }
+ 
+@@ -361,32 +361,32 @@ func (h *Handler) DeleteComment(c *gin.Context) {
+ 	id := uint(id64)
+ 
+ 	if err != nil {
+-		c.JSON(http.StatusBadRequest, utils.NewError(err))
++		utils.JSON(c, http.StatusBadRequest, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	cm, err := h.articleStore.GetCommentByID(id)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if cm == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+ 	if cm.UserID != userIDFromToken(c) {
+-		c.JSON(http.StatusUnauthorized, utils.NewError(errors.New("unauthorized action")))
++		utils.JSON(c, http.StatusUnauthorized, utils.NewError(errors.New("unauthorized action")))
+ 		return
+ 	}
+ 
+ 	if err := h.articleStore.DeleteComment(cm); err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, map[string]interface{}{"result": "ok"})
++	utils.JSON(c, http.StatusOK, map[string]interface{}{"result": "ok"})
+ 	return
+ }
+ 
+@@ -411,21 +411,21 @@ func (h *Handler) Favorite(c *gin.Context) {
+ 	a, err := h.articleStore.GetBySlug(slug)
+ 
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+ 	if err := h.articleStore.AddFavorite(a, userIDFromToken(c)); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleResponse(c, a))
++	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+ 	return
+ }
+ 
+@@ -450,21 +450,21 @@ func (h *Handler) Unfavorite(c *gin.Context) {
+ 
+ 	a, err := h.articleStore.GetBySlug(slug)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 
+ 	if a == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 
+ 	if err := h.articleStore.RemoveFavorite(a, userIDFromToken(c)); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newArticleResponse(c, a))
++	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+ 	return
+ }
+ 
+@@ -485,10 +485,10 @@ func (h *Handler) Unfavorite(c *gin.Context) {
+ func (h *Handler) Tags(c *gin.Context) {
+ 	tags, err := h.articleStore.ListTags()
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, err)
++		utils.JSON(c, http.StatusInternalServerError, err)
+ 		return
+ 	}
+ 
+-	c.JSON(http.StatusOK, newTagListResponse(tags))
++	utils.JSON(c, http.StatusOK, newTagListResponse(tags))
+ 	return
+ }
+diff --git a/handler/article_test.go b/handler/article_test.go
+index 1ef6ac5..50ad2ea 100644
+--- a/handler/article_test.go
++++ b/handler/article_test.go
+@@ -8,8 +8,9 @@ import (
+ 	"testing"
+ 
+ 	"github.com/stretchr/testify/assert"
+-	"github.com/xesina/golang-echo-realworld-example-app/router/middleware"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/router/middleware"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ func TestListArticlesCaseSuccess(t *testing.T) {
+@@ -238,3 +239,34 @@ func TestGetTagsCaseSuccess(t *testing.T) {
+ 		assert.Contains(t, tt.Tags, "tag2")
+ 	}
+ }
++
++// The fixtures give user1 one article of their own and one article from the
++// user they follow, so the original feed count - which counted the caller's own
++// articles - was indistinguishable from the correct one. Adding a second
++// article by the caller separates them.
++func TestFeedCountCountsFollowedAuthorsNotCaller(t *testing.T) {
++	tearDown()
++	setup()
++	own := model.Article{
++		Slug:        "user1-second-slug",
++		Title:       "user1 second title",
++		Description: "d",
++		Body:        "b",
++		AuthorID:    1,
++	}
++	assert.NoError(t, as.CreateArticle(&own))
++
++	req := httptest.NewRequest(http.MethodGet, "/api/articles/feed", nil)
++	req.Header.Set("Content-Type", "application/json")
++	req.Header.Set("Authorization", authHeader(utils.GenerateJWT(1)))
++	rec := httptest.NewRecorder()
++	c := newContext(rec, req)
++	runWithJWT(c, middleware.JWT(utils.JWTSecret), h.Feed)
++
++	if assert.Equal(t, http.StatusOK, rec.Code) {
++		var a articleListResponse
++		assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &a))
++		assert.Equal(t, 1, len(a.Articles), "feed holds only the followed author's article")
++		assert.Equal(t, 1, a.ArticlesCount, "count must match the feed, not the caller's own article count")
++	}
++}
+diff --git a/handler/handler.go b/handler/handler.go
+index ba081b0..c526c76 100644
+--- a/handler/handler.go
++++ b/handler/handler.go
+@@ -1,8 +1,8 @@
+ package handler
+ 
+ import (
+-	"github.com/xesina/golang-echo-realworld-example-app/article"
+-	"github.com/xesina/golang-echo-realworld-example-app/user"
++	"github.com/xesina/golang-gin-realworld-example-app/article"
++	"github.com/xesina/golang-gin-realworld-example-app/user"
+ )
+ 
+ type Handler struct {
+diff --git a/handler/handler_test.go b/handler/handler_test.go
+index 0cca41a..3cb641b 100644
+--- a/handler/handler_test.go
++++ b/handler/handler_test.go
+@@ -12,12 +12,13 @@ import (
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/jinzhu/gorm"
+ 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+-	"github.com/xesina/golang-echo-realworld-example-app/article"
+-	"github.com/xesina/golang-echo-realworld-example-app/db"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
+-	"github.com/xesina/golang-echo-realworld-example-app/router"
+-	"github.com/xesina/golang-echo-realworld-example-app/store"
+-	"github.com/xesina/golang-echo-realworld-example-app/user"
++	"github.com/stretchr/testify/assert"
++	"github.com/xesina/golang-gin-realworld-example-app/article"
++	"github.com/xesina/golang-gin-realworld-example-app/db"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/router"
++	"github.com/xesina/golang-gin-realworld-example-app/store"
++	"github.com/xesina/golang-gin-realworld-example-app/user"
+ )
+ 
+ var (
+@@ -159,3 +160,49 @@ func loadFixtures() error {
+ 
+ 	return nil
+ }
++
++// Every test in this package rebuilds the fixtures and then asserts against
++// them, so a fixture that silently fails to load turns into a confusing
++// failure somewhere else. This asserts the seeded state directly.
++func TestFixturesLoaded(t *testing.T) {
++	tearDown()
++	setup()
++
++	u1, err := us.GetByUsername("user1")
++	assert.NoError(t, err)
++	assert.NotNil(t, u1)
++	assert.Equal(t, "user1@realworld.io", u1.Email)
++	assert.Equal(t, "user1 bio", *u1.Bio)
++
++	u2, err := us.GetByUsername("user2")
++	assert.NoError(t, err)
++	assert.NotNil(t, u2)
++
++	following, err := us.IsFollower(u2.ID, u1.ID)
++	assert.NoError(t, err)
++	assert.True(t, following, "user1 must follow user2")
++
++	notFollowing, err := us.IsFollower(u1.ID, u2.ID)
++	assert.NoError(t, err)
++	assert.False(t, notFollowing, "the follow must not be mutual")
++
++	a1, err := as.GetBySlug("article1-slug")
++	assert.NoError(t, err)
++	assert.NotNil(t, a1)
++	assert.Equal(t, u1.ID, a1.AuthorID)
++	assert.Len(t, a1.Tags, 2)
++
++	a2, err := as.GetBySlug("article2-slug")
++	assert.NoError(t, err)
++	assert.NotNil(t, a2)
++	assert.Equal(t, u2.ID, a2.AuthorID)
++	assert.Len(t, a2.Favorites, 1, "article2 is favorited by user1")
++
++	comments, err := as.GetCommentsBySlug("article1-slug")
++	assert.NoError(t, err)
++	assert.Len(t, comments, 1)
++
++	tags, err := as.ListTags()
++	assert.NoError(t, err)
++	assert.Len(t, tags, 2)
++}
+diff --git a/handler/request.go b/handler/request.go
+index 006c1b5..eb2bda7 100644
+--- a/handler/request.go
++++ b/handler/request.go
+@@ -4,8 +4,8 @@ import (
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/gin-gonic/gin/binding"
+ 	"github.com/gosimple/slug"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
+-	"github.com/xesina/golang-echo-realworld-example-app/router"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/router"
+ )
+ 
+ // bindJSON decodes the JSON request body into obj. echo's binder left obj
+@@ -114,7 +114,7 @@ type articleCreateRequest struct {
+ 		Title       string   `json:"title" validate:"required"`
+ 		Description string   `json:"description" validate:"required"`
+ 		Body        string   `json:"body" validate:"required"`
+-		Tags        []string `json:"tagList, omitempty"`
++		Tags        []string `json:"tagList,omitempty"`
+ 	} `json:"article"`
+ }
+ 
+diff --git a/handler/response.go b/handler/response.go
+index 063499f..9f7a9ec 100644
+--- a/handler/response.go
++++ b/handler/response.go
+@@ -4,9 +4,9 @@ import (
+ 	"time"
+ 
+ 	"github.com/gin-gonic/gin"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
+-	"github.com/xesina/golang-echo-realworld-example-app/user"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/user"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ type userResponse struct {
+diff --git a/handler/routes.go b/handler/routes.go
+index a6e9bf7..9553aec 100644
+--- a/handler/routes.go
++++ b/handler/routes.go
+@@ -4,8 +4,8 @@ import (
+ 	"net/http"
+ 
+ 	"github.com/gin-gonic/gin"
+-	"github.com/xesina/golang-echo-realworld-example-app/router/middleware"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/router/middleware"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ func (h *Handler) Register(v1 *gin.RouterGroup) {
+@@ -18,7 +18,16 @@ func (h *Handler) Register(v1 *gin.RouterGroup) {
+ 	user.GET("", h.CurrentUser)
+ 	user.PUT("", h.UpdateUser)
+ 
+-	profiles := v1.Group("/profiles", jwtMiddleware)
++	// reading a profile is optional-auth per the RealWorld spec; following and
++	// unfollowing still require a token.
++	profiles := v1.Group("/profiles", middleware.JWTWithConfig(
++		middleware.JWTConfig{
++			Skipper: func(c *gin.Context) bool {
++				return c.Request.Method == http.MethodGet
++			},
++			SigningKey: utils.JWTSecret,
++		},
++	))
+ 	profiles.GET("/:username", h.GetProfile)
+ 	profiles.POST("/:username/follow", h.Follow)
+ 	profiles.DELETE("/:username/follow", h.Unfollow)
+diff --git a/handler/user.go b/handler/user.go
+index f3253ac..3e90f42 100644
+--- a/handler/user.go
++++ b/handler/user.go
+@@ -4,8 +4,8 @@ import (
+ 	"net/http"
+ 
+ 	"github.com/gin-gonic/gin"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ // SignUp godoc
+@@ -25,14 +25,14 @@ func (h *Handler) SignUp(c *gin.Context) {
+ 	var u model.User
+ 	req := &userRegisterRequest{}
+ 	if err := req.bind(c, &u); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 	if err := h.userStore.Create(&u); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+-	c.JSON(http.StatusCreated, newUserResponse(&u))
++	utils.JSON(c, http.StatusCreated, newUserResponse(&u))
+ 	return
+ }
+ 
+@@ -54,23 +54,23 @@ func (h *Handler) SignUp(c *gin.Context) {
+ func (h *Handler) Login(c *gin.Context) {
+ 	req := &userLoginRequest{}
+ 	if err := req.bind(c); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 	u, err := h.userStore.GetByEmail(req.User.Email)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusForbidden, utils.AccessForbidden())
++		utils.JSON(c, http.StatusForbidden, utils.AccessForbidden())
+ 		return
+ 	}
+ 	if !u.CheckPassword(req.User.Password) {
+-		c.JSON(http.StatusForbidden, utils.AccessForbidden())
++		utils.JSON(c, http.StatusForbidden, utils.AccessForbidden())
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newUserResponse(u))
++	utils.JSON(c, http.StatusOK, newUserResponse(u))
+ 	return
+ }
+ 
+@@ -92,14 +92,14 @@ func (h *Handler) Login(c *gin.Context) {
+ func (h *Handler) CurrentUser(c *gin.Context) {
+ 	u, err := h.userStore.GetByID(userIDFromToken(c))
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newUserResponse(u))
++	utils.JSON(c, http.StatusOK, newUserResponse(u))
+ 	return
+ }
+ 
+@@ -122,24 +122,24 @@ func (h *Handler) CurrentUser(c *gin.Context) {
+ func (h *Handler) UpdateUser(c *gin.Context) {
+ 	u, err := h.userStore.GetByID(userIDFromToken(c))
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 	req := newUserUpdateRequest()
+ 	req.populate(u)
+ 	if err := req.bind(c, u); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+ 	if err := h.userStore.Update(u); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newUserResponse(u))
++	utils.JSON(c, http.StatusOK, newUserResponse(u))
+ 	return
+ }
+ 
+@@ -163,14 +163,14 @@ func (h *Handler) GetProfile(c *gin.Context) {
+ 	username := c.Param("username")
+ 	u, err := h.userStore.GetByUsername(username)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
++	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+ 	return
+ }
+ 
+@@ -195,18 +195,18 @@ func (h *Handler) Follow(c *gin.Context) {
+ 	username := c.Param("username")
+ 	u, err := h.userStore.GetByUsername(username)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 	if err := h.userStore.AddFollower(u, followerID); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
++	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+ 	return
+ }
+ 
+@@ -231,18 +231,18 @@ func (h *Handler) Unfollow(c *gin.Context) {
+ 	username := c.Param("username")
+ 	u, err := h.userStore.GetByUsername(username)
+ 	if err != nil {
+-		c.JSON(http.StatusInternalServerError, utils.NewError(err))
++		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+ 		return
+ 	}
+ 	if u == nil {
+-		c.JSON(http.StatusNotFound, utils.NotFound())
++		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+ 		return
+ 	}
+ 	if err := h.userStore.RemoveFollower(u, followerID); err != nil {
+-		c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
++		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+ 		return
+ 	}
+-	c.JSON(http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
++	utils.JSON(c, http.StatusOK, newProfileResponse(h.userStore, userIDFromToken(c), u))
+ 	return
+ }
+ 
+diff --git a/handler/user_test.go b/handler/user_test.go
+index f0a13cc..3f078c4 100644
+--- a/handler/user_test.go
++++ b/handler/user_test.go
+@@ -7,8 +7,9 @@ import (
+ 	"testing"
+ 
+ 	"github.com/stretchr/testify/assert"
+-	"github.com/xesina/golang-echo-realworld-example-app/router/middleware"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/router"
++	"github.com/xesina/golang-gin-realworld-example-app/router/middleware"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ func TestSignUpCaseSuccess(t *testing.T) {
+@@ -221,3 +222,33 @@ func TestUnfollow(t *testing.T) {
+ 		assert.Equal(t, false, m["following"])
+ 	}
+ }
++
++// Reading a profile is optional-auth per the RealWorld spec. This drives the
++// real route registration so the group's middleware wiring is what is tested.
++func TestGetProfileWithoutAuth(t *testing.T) {
++	tearDown()
++	setup()
++	r := router.New()
++	h.Register(r.Group("/api"))
++
++	rec := httptest.NewRecorder()
++	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/profiles/user1", nil))
++
++	if assert.Equal(t, http.StatusOK, rec.Code) {
++		m := responseMap(rec.Body.Bytes(), "profile")
++		assert.Equal(t, "user1", m["username"])
++		assert.Equal(t, false, m["following"], "an anonymous caller follows nobody")
++	}
++}
++
++// ...while following still requires a token.
++func TestFollowWithoutAuthIsRejected(t *testing.T) {
++	tearDown()
++	setup()
++	r := router.New()
++	h.Register(r.Group("/api"))
++
++	rec := httptest.NewRecorder()
++	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/profiles/user2/follow", nil))
++	assert.Equal(t, http.StatusUnauthorized, rec.Code)
++}
+diff --git a/main.go b/main.go
+index ff98df6..cac3884 100644
+--- a/main.go
++++ b/main.go
+@@ -2,16 +2,18 @@ package main
+ 
+ import (
+ 	"log"
++	"net"
+ 	"net/http"
++	"os"
+ 
+-	"github.com/xesina/golang-echo-realworld-example-app/db"
+-	"github.com/xesina/golang-echo-realworld-example-app/handler"
+-	"github.com/xesina/golang-echo-realworld-example-app/router"
+-	"github.com/xesina/golang-echo-realworld-example-app/store"
++	"github.com/xesina/golang-gin-realworld-example-app/db"
++	"github.com/xesina/golang-gin-realworld-example-app/handler"
++	"github.com/xesina/golang-gin-realworld-example-app/router"
++	"github.com/xesina/golang-gin-realworld-example-app/store"
+ 
+-	swaggerFiles "github.com/swaggo/files"                       // swagger embedded files
+-	ginSwagger "github.com/swaggo/gin-swagger"                   // gin-swagger middleware
+-	_ "github.com/xesina/golang-echo-realworld-example-app/docs" // docs is generated by Swag CLI, you have to import it.
++	swaggerFiles "github.com/swaggo/files"                      // swagger embedded files
++	ginSwagger "github.com/swaggo/gin-swagger"                  // gin-swagger middleware
++	_ "github.com/xesina/golang-gin-realworld-example-app/docs" // docs is generated by Swag CLI, you have to import it.
+ )
+ 
+ // @title Swagger Example API
+@@ -30,6 +32,26 @@ import (
+ // @in header
+ // @name Authorization
+ 
++// listenAddr is the address the server binds. It defaulted to a hardcoded
++// 127.0.0.1:8585, which is wrong twice over inside a container: loopback is
++// unreachable from outside it, and a fixed port ignores the one the runtime
++// published. PORT and HOST are the conventional names a container runtime sets,
++// and ADDR overrides both for anyone who wants a specific address.
++func listenAddr() string {
++	if addr := os.Getenv("ADDR"); addr != "" {
++		return addr
++	}
++	host := os.Getenv("HOST")
++	if host == "" {
++		host = "0.0.0.0"
++	}
++	port := os.Getenv("PORT")
++	if port == "" {
++		port = "8585"
++	}
++	return net.JoinHostPort(host, port)
++}
++
+ func main() {
+ 	r := router.New()
+ 
+@@ -44,5 +66,7 @@ func main() {
+ 	as := store.NewArticleStore(d)
+ 	h := handler.NewHandler(us, as)
+ 	h.Register(v1)
+-	log.Fatal(http.ListenAndServe("127.0.0.1:8585", router.RemoveTrailingSlash(r)))
++	addr := listenAddr()
++	log.Printf("listening on %s", addr)
++	log.Fatal(http.ListenAndServe(addr, router.RemoveTrailingSlash(r)))
+ }
+diff --git a/main_test.go b/main_test.go
+new file mode 100644
+index 0000000..8f00221
+--- /dev/null
++++ b/main_test.go
+@@ -0,0 +1,32 @@
++package main
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++// A container runtime tells the application where to listen through the
++// environment; a hardcoded address is unreachable from outside the container
++// and ignores the port that was actually published.
++func TestListenAddr(t *testing.T) {
++	cases := []struct {
++		name string
++		env  map[string]string
++		want string
++	}{
++		{"binds all interfaces by default", nil, "0.0.0.0:8585"},
++		{"honours PORT", map[string]string{"PORT": "9999"}, "0.0.0.0:9999"},
++		{"honours HOST", map[string]string{"HOST": "127.0.0.1"}, "127.0.0.1:8585"},
++		{"honours both", map[string]string{"HOST": "127.0.0.1", "PORT": "7777"}, "127.0.0.1:7777"},
++		{"ADDR wins outright", map[string]string{"ADDR": "10.0.0.1:1234", "PORT": "9999"}, "10.0.0.1:1234"},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			for k, v := range tc.env {
++				t.Setenv(k, v)
++			}
++			assert.Equal(t, tc.want, listenAddr())
++		})
++	}
++}
+diff --git a/readme.md b/readme.md
+index bb85570..b655f07 100644
+--- a/readme.md
++++ b/readme.md
+@@ -1,19 +1,19 @@
+ # ![RealWorld Example App](logo.png)
+ 
+-> ### Golang/Echo codebase containing real world examples (CRUD, auth, advanced patterns, etc) that adheres to the [RealWorld](https://github.com/gothinkster/realworld) spec and API.
++> ### Golang/Gin codebase containing real world examples (CRUD, auth, advanced patterns, etc) that adheres to the [RealWorld](https://github.com/gothinkster/realworld) spec and API.
+ 
+ ### [Demo](https://github.com/gothinkster/realworld)&nbsp;&nbsp;&nbsp;&nbsp;[RealWorld](https://github.com/gothinkster/realworld)
+ 
+-[![Build Status](https://travis-ci.org/xesina/golang-echo-realworld-example-app.svg?branch=master)](https://travis-ci.org/xesina/golang-echo-realworld-example-app)
++[![Build Status](https://github.com/xesina/golang-gin-realworld-example-app/actions/workflows/go.yml/badge.svg)](https://github.com/xesina/golang-gin-realworld-example-app/actions/workflows/go.yml)
+ 
+-This codebase was created to demonstrate a fully fledged fullstack application built with **Golang/Echo** including CRUD operations, authentication, routing, pagination, and more.
++This codebase was created to demonstrate a fully fledged fullstack application built with **Golang/Gin** including CRUD operations, authentication, routing, pagination, and more.
+ 
+ ## Getting started
+ 
+-### Install Golang (go1.11+)
++### Install Golang (go1.25+)
+ 
+ Please check the official golang installation guide before you start. [Official Documentation](https://golang.org/doc/install)
+-Also make sure you have installed a go1.11+ version.
++Also make sure you have installed a go1.25+ version.
+ 
+ ### Environment Config
+ 
+@@ -35,19 +35,19 @@ For more info and detailed instructions please check this guide: [Setting GOPATH
+ Clone this repository:
+ 
+ ```bash
+-➜ git clone https://github.com/xesina/golang-echo-realworld-example-app.git
++➜ git clone https://github.com/xesina/golang-gin-realworld-example-app.git
+ ```
+ 
+ Or simply use the following command which will handle cloning the repo:
+ 
+ ```bash
+-➜ go get -u -v github.com/xesina/golang-echo-realworld-example-app
++➜ go get -u -v github.com/xesina/golang-gin-realworld-example-app
+ ```
+ 
+ Switch to the repo folder
+ 
+ ```bash
+-➜ cd $GOPATH/src/github.com/xesina/golang-echo-realworld-example-app
++➜ cd golang-gin-realworld-example-app
+ ```
+ 
+ ### Install dependencies
+diff --git a/router/middleware/jwt.go b/router/middleware/jwt.go
+index d1b335c..54dbdf2 100644
+--- a/router/middleware/jwt.go
++++ b/router/middleware/jwt.go
+@@ -7,7 +7,7 @@ import (
+ 
+ 	"github.com/dgrijalva/jwt-go"
+ 	"github.com/gin-gonic/gin"
+-	"github.com/xesina/golang-echo-realworld-example-app/utils"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ type (
+@@ -41,7 +41,7 @@ func JWTWithConfig(config JWTConfig) gin.HandlerFunc {
+ 					return
+ 				}
+ 			}
+-			c.AbortWithStatusJSON(http.StatusUnauthorized, utils.NewError(err))
++			utils.AbortJSON(c, http.StatusUnauthorized, utils.NewError(err))
+ 			return
+ 		}
+ 		token, err := jwt.Parse(auth, func(token *jwt.Token) (interface{}, error) {
+@@ -51,7 +51,7 @@ func JWTWithConfig(config JWTConfig) gin.HandlerFunc {
+ 			return config.SigningKey, nil
+ 		})
+ 		if err != nil {
+-			c.AbortWithStatusJSON(http.StatusForbidden, utils.NewError(ErrJWTInvalid))
++			utils.AbortJSON(c, http.StatusForbidden, utils.NewError(ErrJWTInvalid))
+ 			return
+ 		}
+ 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+@@ -60,7 +60,7 @@ func JWTWithConfig(config JWTConfig) gin.HandlerFunc {
+ 			c.Next()
+ 			return
+ 		}
+-		c.AbortWithStatusJSON(http.StatusForbidden, utils.NewError(ErrJWTInvalid))
++		utils.AbortJSON(c, http.StatusForbidden, utils.NewError(ErrJWTInvalid))
+ 	}
+ }
+ 
+diff --git a/router/middleware/jwt_test.go b/router/middleware/jwt_test.go
+new file mode 100644
+index 0000000..791011f
+--- /dev/null
++++ b/router/middleware/jwt_test.go
+@@ -0,0 +1,113 @@
++package middleware
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/gin-gonic/gin"
++	"github.com/stretchr/testify/assert"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
++)
++
++func TestMain(m *testing.M) {
++	gin.SetMode(gin.TestMode)
++	m.Run()
++}
++
++// run drives mw with the given Authorization header and method, reporting
++// whether the chain was allowed to continue and what the user id ended up as.
++func run(t *testing.T, mw gin.HandlerFunc, method, authHeader string) (*httptest.ResponseRecorder, bool, uint) {
++	t.Helper()
++	rec := httptest.NewRecorder()
++	c, _ := gin.CreateTestContext(rec)
++	c.Request = httptest.NewRequest(method, "/api/user", nil)
++	if authHeader != "" {
++		c.Request.Header.Set("Authorization", authHeader)
++	}
++	mw(c)
++	var id uint
++	if v, ok := c.Get("user"); ok {
++		id, _ = v.(uint)
++	}
++	return rec, !c.IsAborted(), id
++}
++
++func errorBody(t *testing.T, rec *httptest.ResponseRecorder) string {
++	t.Helper()
++	var e struct {
++		Errors struct {
++			Body string `json:"body"`
++		} `json:"errors"`
++	}
++	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &e))
++	return e.Errors.Body
++}
++
++func TestJWTMissingToken(t *testing.T) {
++	rec, proceeded, _ := run(t, JWT(utils.JWTSecret), http.MethodGet, "")
++	assert.False(t, proceeded, "chain must be aborted when no token is present")
++	assert.Equal(t, http.StatusUnauthorized, rec.Code)
++	assert.Equal(t, "missing or malformed jwt", errorBody(t, rec))
++}
++
++func TestJWTMalformedScheme(t *testing.T) {
++	// the extractor only accepts the "Token" scheme
++	rec, proceeded, _ := run(t, JWT(utils.JWTSecret), http.MethodGet, "Bearer "+utils.GenerateJWT(1))
++	assert.False(t, proceeded)
++	assert.Equal(t, http.StatusUnauthorized, rec.Code)
++}
++
++func TestJWTInvalidToken(t *testing.T) {
++	rec, proceeded, _ := run(t, JWT(utils.JWTSecret), http.MethodGet, "Token not-a-jwt-at-all")
++	assert.False(t, proceeded, "chain must be aborted for an unparseable token")
++	assert.Equal(t, http.StatusForbidden, rec.Code)
++	assert.Equal(t, "invalid or expired jwt", errorBody(t, rec))
++}
++
++func TestJWTWrongSigningKey(t *testing.T) {
++	// a well formed token signed by somebody else must not be accepted
++	rec, proceeded, _ := run(t, JWTWithConfig(JWTConfig{SigningKey: []byte("not-the-secret")}),
++		http.MethodGet, "Token "+utils.GenerateJWT(1))
++	assert.False(t, proceeded)
++	assert.Equal(t, http.StatusForbidden, rec.Code)
++}
++
++func TestJWTValidTokenSetsUser(t *testing.T) {
++	rec, proceeded, id := run(t, JWT(utils.JWTSecret), http.MethodGet, "Token "+utils.GenerateJWT(42))
++	assert.True(t, proceeded, "chain must continue for a valid token")
++	assert.Equal(t, uint(42), id, "the claim's user id must reach the handler")
++	assert.Equal(t, http.StatusOK, rec.Code)
++}
++
++func TestJWTSkipperAllowsAnonymous(t *testing.T) {
++	mw := JWTWithConfig(JWTConfig{
++		Skipper:    func(c *gin.Context) bool { return c.Request.Method == http.MethodGet },
++		SigningKey: utils.JWTSecret,
++	})
++	_, proceeded, id := run(t, mw, http.MethodGet, "")
++	assert.True(t, proceeded, "skipper must let an anonymous GET through")
++	assert.Equal(t, uint(0), id, "an anonymous request carries no user id")
++}
++
++func TestJWTSkipperStillRejectsOtherMethods(t *testing.T) {
++	mw := JWTWithConfig(JWTConfig{
++		Skipper:    func(c *gin.Context) bool { return c.Request.Method == http.MethodGet },
++		SigningKey: utils.JWTSecret,
++	})
++	rec, proceeded, _ := run(t, mw, http.MethodPost, "")
++	assert.False(t, proceeded, "a skipper for GET must not exempt POST")
++	assert.Equal(t, http.StatusUnauthorized, rec.Code)
++}
++
++func TestJWTSkipperNotConsultedWhenTokenPresent(t *testing.T) {
++	// the skipper only governs the missing-token case; a bad token is still bad
++	mw := JWTWithConfig(JWTConfig{
++		Skipper:    func(c *gin.Context) bool { return true },
++		SigningKey: utils.JWTSecret,
++	})
++	rec, proceeded, _ := run(t, mw, http.MethodGet, "Token garbage")
++	assert.False(t, proceeded)
++	assert.Equal(t, http.StatusForbidden, rec.Code)
++}
+diff --git a/router/router.go b/router/router.go
+index ba5cad5..08a16a5 100644
+--- a/router/router.go
++++ b/router/router.go
+@@ -6,6 +6,7 @@ import (
+ 
+ 	"github.com/gin-contrib/cors"
+ 	"github.com/gin-gonic/gin"
++	"github.com/xesina/golang-gin-realworld-example-app/utils"
+ )
+ 
+ func New() *gin.Engine {
+@@ -16,6 +17,15 @@ func New() *gin.Engine {
+ 	r.RedirectTrailingSlash = false
+ 	r.Use(gin.Logger())
+ 	r.Use(gin.Recovery())
++	// echo's CORS middleware set Vary: Origin on every response; gin-contrib
++	// omits it when all origins are allowed, and adds its own Vary list on a
++	// preflight, so it is set here for everything except preflights.
++	r.Use(func(c *gin.Context) {
++		if c.Request.Method != http.MethodOptions {
++			c.Writer.Header().Set("Vary", "Origin")
++		}
++		c.Next()
++	})
+ 	r.Use(cors.New(cors.Config{
+ 		AllowAllOrigins: true,
+ 		AllowHeaders:    []string{"Origin", "Content-Type", "Accept", "Authorization"},
+@@ -28,6 +38,16 @@ func New() *gin.Engine {
+ 			http.MethodDelete,
+ 		},
+ 	}))
++	// echo answered an unmatched route with JSON, and every other response this
++	// API produces is JSON; gin's defaults are plain text.
++	r.HandleMethodNotAllowed = true
++	r.NoRoute(func(c *gin.Context) {
++		utils.JSON(c, http.StatusNotFound, gin.H{"message": "Not Found"})
++	})
++	r.NoMethod(func(c *gin.Context) {
++		utils.JSON(c, http.StatusMethodNotAllowed, gin.H{"message": "Method Not Allowed"})
++	})
++
+ 	return r
+ }
+ 
+diff --git a/router/router_test.go b/router/router_test.go
+new file mode 100644
+index 0000000..dddf9cd
+--- /dev/null
++++ b/router/router_test.go
+@@ -0,0 +1,87 @@
++package router
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/gin-gonic/gin"
++	"github.com/stretchr/testify/assert"
++)
++
++func TestMain(m *testing.M) {
++	gin.SetMode(gin.TestMode)
++	m.Run()
++}
++
++// RemoveTrailingSlash stands in for echo's pre-routing middleware, which
++// rewrote the path rather than redirecting. These assert the rewrite, and that
++// no redirect is produced.
++func TestRemoveTrailingSlashRewritesPath(t *testing.T) {
++	cases := []struct {
++		name string
++		in   string
++		want string
++	}{
++		{"strips one trailing slash", "/api/tags/", "/api/tags"},
++		{"strips repeated trailing slashes", "/api/tags///", "/api/tags"},
++		{"leaves a path without one alone", "/api/tags", "/api/tags"},
++		{"preserves root", "/", "/"},
++		{"collapses an all-slash path back to root", "//", "/"},
++		{"collapses a longer all-slash path back to root", "////", "/"},
++		{"only touches the tail", "/api/articles/some-slug/", "/api/articles/some-slug"},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			var seen string
++			h := RemoveTrailingSlash(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				seen = r.URL.Path
++				w.WriteHeader(http.StatusOK)
++			}))
++			rec := httptest.NewRecorder()
++			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.in, nil))
++			assert.Equal(t, tc.want, seen, "path handed to the router")
++			assert.Equal(t, http.StatusOK, rec.Code, "must rewrite, never redirect")
++		})
++	}
++}
++
++// A route registered without a trailing slash must be reachable with one, and
++// answer directly rather than with gin's 301.
++func TestRemoveTrailingSlashReachesTheRoute(t *testing.T) {
++	r := New()
++	r.GET("/api/tags", func(c *gin.Context) { c.String(http.StatusOK, "tags") })
++
++	rec := httptest.NewRecorder()
++	RemoveTrailingSlash(r).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tags/", nil))
++
++	assert.Equal(t, http.StatusOK, rec.Code)
++	assert.Equal(t, "tags", rec.Body.String())
++}
++
++func TestValidatorRejectsAndAccepts(t *testing.T) {
++	type payload struct {
++		Email string `validate:"required,email"`
++	}
++	assert.Error(t, Validate(&payload{Email: "not-an-email"}))
++	assert.NoError(t, Validate(&payload{Email: "user@example.com"}))
++}
++
++// echo answered unmatched routes and wrong methods with JSON; gin's defaults
++// are plain text, which would have been the only non-JSON response the API
++// produced.
++func TestNoRouteAndNoMethodAnswerJSON(t *testing.T) {
++	r := New()
++	r.GET("/api/tags", func(c *gin.Context) { c.String(http.StatusOK, "tags") })
++
++	rec := httptest.NewRecorder()
++	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
++	assert.Equal(t, http.StatusNotFound, rec.Code)
++	assert.JSONEq(t, `{"message":"Not Found"}`, rec.Body.String())
++	assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
++
++	rec = httptest.NewRecorder()
++	r.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/tags", nil))
++	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
++	assert.JSONEq(t, `{"message":"Method Not Allowed"}`, rec.Body.String())
++}
+diff --git a/store/article.go b/store/article.go
+index d3eeab0..560806d 100644
+--- a/store/article.go
++++ b/store/article.go
+@@ -2,7 +2,7 @@ package store
+ 
+ import (
+ 	"github.com/jinzhu/gorm"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
+ )
+ 
+ type ArticleStore struct {
+@@ -244,7 +244,7 @@ func (as *ArticleStore) ListFeed(userID uint, offset, limit int) ([]model.Articl
+ 		Limit(limit).
+ 		Order("created_at desc").
+ 		Find(&articles)
+-	as.db.Where(&model.Article{AuthorID: u.ID}).Model(&model.Article{}).Count(&count)
++	as.db.Where("author_id in (?)", ids).Model(&model.Article{}).Count(&count)
+ 
+ 	return articles, count, nil
+ }
+diff --git a/store/user.go b/store/user.go
+index 16a14bf..b0cebef 100644
+--- a/store/user.go
++++ b/store/user.go
+@@ -2,7 +2,7 @@ package store
+ 
+ import (
+ 	"github.com/jinzhu/gorm"
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
+ )
+ 
+ type UserStore struct {
+diff --git a/user/user.go b/user/user.go
+index 219b5aa..cbab5f9 100644
+--- a/user/user.go
++++ b/user/user.go
+@@ -1,7 +1,7 @@
+ package user
+ 
+ import (
+-	"github.com/xesina/golang-echo-realworld-example-app/model"
++	"github.com/xesina/golang-gin-realworld-example-app/model"
+ )
+ 
+ type Store interface {
+diff --git a/utils/render.go b/utils/render.go
+new file mode 100644
+index 0000000..ffcbb0b
+--- /dev/null
++++ b/utils/render.go
+@@ -0,0 +1,47 @@
++package utils
++
++import (
++	"encoding/json"
++	"net/http"
++
++	"github.com/gin-gonic/gin"
++)
++
++// echo encoded responses with a streaming json encoder, which terminates each
++// document with a newline, and labelled them with an upper case charset. gin
++// marshals without the newline and lower cases the charset, so responses are
++// rendered through this type instead of gin's own to keep both bytes identical
++// to the pre-migration server.
++type jsonRender struct {
++	data interface{}
++}
++
++var jsonContentType = []string{"application/json; charset=UTF-8"}
++
++func (r jsonRender) Render(w http.ResponseWriter) error {
++	r.WriteContentType(w)
++	b, err := json.Marshal(r.data)
++	if err != nil {
++		return err
++	}
++	_, err = w.Write(append(b, '\n'))
++	return err
++}
++
++func (r jsonRender) WriteContentType(w http.ResponseWriter) {
++	header := w.Header()
++	if len(header["Content-Type"]) == 0 {
++		header["Content-Type"] = jsonContentType
++	}
++}
++
++// JSON writes obj as the response body with the given status code.
++func JSON(c *gin.Context, code int, obj interface{}) {
++	c.Render(code, jsonRender{data: obj})
++}
++
++// AbortJSON is JSON, for a middleware that is refusing the request.
++func AbortJSON(c *gin.Context, code int, obj interface{}) {
++	c.Abort()
++	JSON(c, code, obj)
++}

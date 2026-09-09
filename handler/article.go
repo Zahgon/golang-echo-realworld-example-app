@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/labstack/echo/v4"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
-	"github.com/xesina/golang-echo-realworld-example-app/utils"
+	"github.com/gin-gonic/gin"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/utils"
 )
 
 // GetArticle godoc
@@ -22,19 +22,22 @@ import (
 // @Failure 400 {object} utils.Error
 // @Failure 500 {object} utils.Error
 // @Router /articles/{slug} [get]
-func (h *Handler) GetArticle(c echo.Context) error {
+func (h *Handler) GetArticle(c *gin.Context) {
 	slug := c.Param("slug")
 	a, err := h.articleStore.GetBySlug(slug)
 
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
-	return c.JSON(http.StatusOK, newArticleResponse(c, a))
+	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+	return
 }
 
 // Articles godoc
@@ -52,22 +55,22 @@ func (h *Handler) GetArticle(c echo.Context) error {
 // @Success 200 {object} articleListResponse
 // @Failure 500 {object} utils.Error
 // @Router /articles [get]
-func (h *Handler) Articles(c echo.Context) error {
+func (h *Handler) Articles(c *gin.Context) {
 	var (
 		articles []model.Article
 		count    int
 	)
 
-	tag := c.QueryParam("tag")
-	author := c.QueryParam("author")
-	favoritedBy := c.QueryParam("favorited")
+	tag := c.Query("tag")
+	author := c.Query("author")
+	favoritedBy := c.Query("favorited")
 
-	offset, err := strconv.Atoi(c.QueryParam("offset"))
+	offset, err := strconv.Atoi(c.Query("offset"))
 	if err != nil {
 		offset = 0
 	}
 
-	limit, err := strconv.Atoi(c.QueryParam("limit"))
+	limit, err := strconv.Atoi(c.Query("limit"))
 	if err != nil {
 		limit = 20
 	}
@@ -75,26 +78,31 @@ func (h *Handler) Articles(c echo.Context) error {
 	if tag != "" {
 		articles, count, err = h.articleStore.ListByTag(tag, offset, limit)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, nil)
+			utils.JSON(c, http.StatusInternalServerError, nil)
+			return
 		}
 	} else if author != "" {
 		articles, count, err = h.articleStore.ListByAuthor(author, offset, limit)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, nil)
+			utils.JSON(c, http.StatusInternalServerError, nil)
+			return
 		}
 	} else if favoritedBy != "" {
 		articles, count, err = h.articleStore.ListByWhoFavorited(favoritedBy, offset, limit)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, nil)
+			utils.JSON(c, http.StatusInternalServerError, nil)
+			return
 		}
 	} else {
 		articles, count, err = h.articleStore.List(offset, limit)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, nil)
+			utils.JSON(c, http.StatusInternalServerError, nil)
+			return
 		}
 	}
 
-	return c.JSON(http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+	utils.JSON(c, http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+	return
 }
 
 // Feed godoc
@@ -111,28 +119,30 @@ func (h *Handler) Articles(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/feed [get]
-func (h *Handler) Feed(c echo.Context) error {
+func (h *Handler) Feed(c *gin.Context) {
 	var (
 		articles []model.Article
 		count    int
 	)
 
-	offset, err := strconv.Atoi(c.QueryParam("offset"))
+	offset, err := strconv.Atoi(c.Query("offset"))
 	if err != nil {
 		offset = 0
 	}
 
-	limit, err := strconv.Atoi(c.QueryParam("limit"))
+	limit, err := strconv.Atoi(c.Query("limit"))
 	if err != nil {
 		limit = 20
 	}
 
 	articles, count, err = h.articleStore.ListFeed(userIDFromToken(c), offset, limit)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, nil)
+		utils.JSON(c, http.StatusInternalServerError, nil)
+		return
 	}
 
-	return c.JSON(http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+	utils.JSON(c, http.StatusOK, newArticleListResponse(h.userStore, userIDFromToken(c), articles, count))
+	return
 }
 
 // CreateArticle godoc
@@ -149,22 +159,25 @@ func (h *Handler) Feed(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles [post]
-func (h *Handler) CreateArticle(c echo.Context) error {
+func (h *Handler) CreateArticle(c *gin.Context) {
 	var a model.Article
 
 	req := &articleCreateRequest{}
 	if err := req.bind(c, &a); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
 	a.AuthorID = userIDFromToken(c)
 
 	err := h.articleStore.CreateArticle(&a)
 	if err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusCreated, newArticleResponse(c, &a))
+	utils.JSON(c, http.StatusCreated, newArticleResponse(c, &a))
+	return
 }
 
 // UpdateArticle godoc
@@ -184,30 +197,35 @@ func (h *Handler) CreateArticle(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug} [put]
-func (h *Handler) UpdateArticle(c echo.Context) error {
+func (h *Handler) UpdateArticle(c *gin.Context) {
 	slug := c.Param("slug")
 
 	a, err := h.articleStore.GetUserArticleBySlug(userIDFromToken(c), slug)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	req := &articleUpdateRequest{}
 	req.populate(a)
 
 	if err := req.bind(c, a); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
 	if err = h.articleStore.UpdateArticle(a, req.Article.Tags); err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, newArticleResponse(c, a))
+	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+	return
 }
 
 // DeleteArticle godoc
@@ -224,24 +242,28 @@ func (h *Handler) UpdateArticle(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug} [delete]
-func (h *Handler) DeleteArticle(c echo.Context) error {
+func (h *Handler) DeleteArticle(c *gin.Context) {
 	slug := c.Param("slug")
 
 	a, err := h.articleStore.GetUserArticleBySlug(userIDFromToken(c), slug)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	err = h.articleStore.DeleteArticle(a)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{"result": "ok"})
+	utils.JSON(c, http.StatusOK, map[string]interface{}{"result": "ok"})
+	return
 }
 
 // AddComment godoc
@@ -261,30 +283,35 @@ func (h *Handler) DeleteArticle(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug}/comments [post]
-func (h *Handler) AddComment(c echo.Context) error {
+func (h *Handler) AddComment(c *gin.Context) {
 	slug := c.Param("slug")
 
 	a, err := h.articleStore.GetBySlug(slug)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	var cm model.Comment
 
 	req := &createCommentRequest{}
 	if err := req.bind(c, &cm); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
 	if err = h.articleStore.AddComment(a, &cm); err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusCreated, newCommentResponse(c, &cm))
+	utils.JSON(c, http.StatusCreated, newCommentResponse(c, &cm))
+	return
 }
 
 // GetComments godoc
@@ -299,15 +326,17 @@ func (h *Handler) AddComment(c echo.Context) error {
 // @Failure 422 {object} utils.Error
 // @Failure 500 {object} utils.Error
 // @Router /articles/{slug}/comments [get]
-func (h *Handler) GetComments(c echo.Context) error {
+func (h *Handler) GetComments(c *gin.Context) {
 	slug := c.Param("slug")
 
 	cm, err := h.articleStore.GetCommentsBySlug(slug)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, newCommentListResponse(c, cm))
+	utils.JSON(c, http.StatusOK, newCommentListResponse(c, cm))
+	return
 }
 
 // DeleteComment godoc
@@ -327,32 +356,38 @@ func (h *Handler) GetComments(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug}/comments/{id} [delete]
-func (h *Handler) DeleteComment(c echo.Context) error {
+func (h *Handler) DeleteComment(c *gin.Context) {
 	id64, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	id := uint(id64)
 
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, utils.NewError(err))
+		utils.JSON(c, http.StatusBadRequest, utils.NewError(err))
+		return
 	}
 
 	cm, err := h.articleStore.GetCommentByID(id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if cm == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	if cm.UserID != userIDFromToken(c) {
-		return c.JSON(http.StatusUnauthorized, utils.NewError(errors.New("unauthorized action")))
+		utils.JSON(c, http.StatusUnauthorized, utils.NewError(errors.New("unauthorized action")))
+		return
 	}
 
 	if err := h.articleStore.DeleteComment(cm); err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{"result": "ok"})
+	utils.JSON(c, http.StatusOK, map[string]interface{}{"result": "ok"})
+	return
 }
 
 // Favorite godoc
@@ -371,23 +406,27 @@ func (h *Handler) DeleteComment(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug}/favorite [post]
-func (h *Handler) Favorite(c echo.Context) error {
+func (h *Handler) Favorite(c *gin.Context) {
 	slug := c.Param("slug")
 	a, err := h.articleStore.GetBySlug(slug)
 
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	if err := h.articleStore.AddFavorite(a, userIDFromToken(c)); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, newArticleResponse(c, a))
+	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+	return
 }
 
 // Unfavorite godoc
@@ -406,23 +445,27 @@ func (h *Handler) Favorite(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /articles/{slug}/favorite [delete]
-func (h *Handler) Unfavorite(c echo.Context) error {
+func (h *Handler) Unfavorite(c *gin.Context) {
 	slug := c.Param("slug")
 
 	a, err := h.articleStore.GetBySlug(slug)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, utils.NewError(err))
+		utils.JSON(c, http.StatusInternalServerError, utils.NewError(err))
+		return
 	}
 
 	if a == nil {
-		return c.JSON(http.StatusNotFound, utils.NotFound())
+		utils.JSON(c, http.StatusNotFound, utils.NotFound())
+		return
 	}
 
 	if err := h.articleStore.RemoveFavorite(a, userIDFromToken(c)); err != nil {
-		return c.JSON(http.StatusUnprocessableEntity, utils.NewError(err))
+		utils.JSON(c, http.StatusUnprocessableEntity, utils.NewError(err))
+		return
 	}
 
-	return c.JSON(http.StatusOK, newArticleResponse(c, a))
+	utils.JSON(c, http.StatusOK, newArticleResponse(c, a))
+	return
 }
 
 // Tags godoc
@@ -439,11 +482,13 @@ func (h *Handler) Unfavorite(c echo.Context) error {
 // @Failure 500 {object} utils.Error
 // @Security ApiKeyAuth
 // @Router /tags [get]
-func (h *Handler) Tags(c echo.Context) error {
+func (h *Handler) Tags(c *gin.Context) {
 	tags, err := h.articleStore.ListTags()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, err)
+		utils.JSON(c, http.StatusInternalServerError, err)
+		return
 	}
 
-	return c.JSON(http.StatusOK, newTagListResponse(tags))
+	utils.JSON(c, http.StatusOK, newTagListResponse(tags))
+	return
 }

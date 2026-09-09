@@ -2,7 +2,7 @@ package store
 
 import (
 	"github.com/jinzhu/gorm"
-	"github.com/xesina/golang-echo-realworld-example-app/model"
+	"github.com/xesina/golang-gin-realworld-example-app/model"
 )
 
 type ArticleStore struct {
@@ -244,7 +244,7 @@ func (as *ArticleStore) ListFeed(userID uint, offset, limit int) ([]model.Articl
 		Limit(limit).
 		Order("created_at desc").
 		Find(&articles)
-	as.db.Where(&model.Article{AuthorID: u.ID}).Model(&model.Article{}).Count(&count)
+	as.db.Where("author_id in (?)", ids).Model(&model.Article{}).Count(&count)
 
 	return articles, count, nil
 }
